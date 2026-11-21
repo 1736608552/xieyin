@@ -35,7 +35,7 @@ import time
 import urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-VERSION = "2.2.3"
+VERSION = "2.2.4"
 APP_DIR = os.path.dirname(os.path.realpath(__file__))
 DATA_DIR = os.environ.get("XIEYIN_DATA") or os.path.join(APP_DIR, "data")
 CONF_PATH = os.path.join(DATA_DIR, "config.json")

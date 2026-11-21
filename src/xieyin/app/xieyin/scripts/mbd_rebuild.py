@@ -33,7 +33,7 @@ SALT = "NDzZTVxnRKP8Z0jXg1VAMonaG8akvh"
 APIKEY = "16CCEB3D-AB42-077D-36A1-F355324E4237"
 BASE = os.environ.get("XIEYIN_FNOS_API") or "http://127.0.0.1:8005"
 API = "/v/api/v1"
-TIMEOUT = 10
+TIMEOUT = 30  # 飞牛媒体库扫描时高负荷，放宽超时避免 TimeoutError
 
 DB_CANDIDATES = [
     "/usr/local/apps/@appdata/trim.media/database",
@@ -85,28 +85,33 @@ def _authx(path: str, params: dict, is_get: bool) -> str:
 
 
 def _request(method: str, path: str, token: str,
-             body=None, query=None) -> dict:
-    """发一个带 authx 签名的请求；body 必须与签名输入逐字节一致。"""
+             body=None, query=None, retries: int = 3) -> dict:
+    """发一个带 authx 签名的请求；body 必须与签名输入逐字节一致。遇超时自动退避重试。"""
     q = dict(query or {})
-    if method == "GET":
-        ax = _authx(path, q, True)
-        data = None
-    else:
-        payload = body if body is not None else {}
-        text = json.dumps(payload, separators=(",", ":"), ensure_ascii=False)
-        ax = _authx(path, payload, False)
-        data = text.encode("utf-8")
-    url = BASE + path + ("?" + urllib.parse.urlencode(q) if q else "")
-    req = urllib.request.Request(
-        url, data=data, method=method,
-        headers={"User-Agent": "Mozilla/5.0",
-                 "Content-Type": "application/json",
-                 "authx": ax, "Authorization": token or ""})
-    try:
-        with urllib.request.urlopen(req, timeout=TIMEOUT) as r:
-            return json.loads(r.read().decode("utf-8", "replace"))
-    except Exception as e:
-        return {"code": -1, "msg": repr(e)[:160]}
+    payload = body if body is not None else {}
+    last_err = ""
+    for attempt in range(max(1, retries)):
+        if method == "GET":
+            ax = _authx(path, q, True)
+            data = None
+        else:
+            text = json.dumps(payload, separators=(",", ":"), ensure_ascii=False)
+            ax = _authx(path, payload, False)
+            data = text.encode("utf-8")
+        url = BASE + path + ("?" + urllib.parse.urlencode(q) if q else "")
+        req = urllib.request.Request(
+            url, data=data, method=method,
+            headers={"User-Agent": "Mozilla/5.0",
+                     "Content-Type": "application/json",
+                     "authx": ax, "Authorization": token or ""})
+        try:
+            with urllib.request.urlopen(req, timeout=TIMEOUT) as r:
+                return json.loads(r.read().decode("utf-8", "replace"))
+        except Exception as e:
+            last_err = repr(e)[:160]
+            if attempt < retries - 1:
+                time.sleep(1.5 * (attempt + 1))
+    return {"code": -1, "msg": last_err}
 
 
 class Client:

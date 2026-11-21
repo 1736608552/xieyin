@@ -130,7 +130,18 @@ def sync_one(client, nfo_path: str, write: bool) -> str:
     guid = item_guid_for_video(vpath)
     if not guid:
         return "SKIP 飞牛未收录"
-    d = client.get_edit_detail(guid)
+    d = None
+    for attempt in range(3):
+        try:
+            d = client.get_edit_detail(guid)
+            if d:
+                break
+        except Exception as e:
+            if attempt == 2:
+                raise
+            time.sleep(2.0 * (attempt + 1))
+    if not d:
+        return "FAIL 获取条目详情失败"
     old_title = str(d.get("title") or "")
     old_plot = str(d.get("overview") or "")
     if old_title == title and old_plot == plot:
@@ -192,7 +203,7 @@ def main() -> int:
                 print("SCAN", lib.get("name"), lib.get("guid"))
             except Exception as e:
                 print("WARN scan %s: %s" % (lib.get("name"), e))
-        time.sleep(3)
+        time.sleep(6)
 
     files = []
     for dp, dns, fns in os.walk(root):
@@ -216,6 +227,7 @@ def main() -> int:
         except Exception as e:
             r = "ERR  %s" % e
         print("[%d/%d] %s  %s" % (i, len(files), os.path.relpath(p, root), r), flush=True)
+        time.sleep(0.3)
         if r.startswith("OK"):
             ok += 1
         elif r.startswith(("SKIP", "SAME")):
