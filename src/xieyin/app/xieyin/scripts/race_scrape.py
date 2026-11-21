@@ -507,7 +507,11 @@ def write_artifacts(d, folder: Path, video: Path, args, cover_bytes=None, cover_
             for al in (alias_poster, alias_folder):
                 if allowed(al, len(poster_bytes or cover_bytes)) and poster.exists():
                     shutil.copyfile(poster, al)
-    # 演员头像：下载 JavBus 女优图，NFO 里写绝对路径（新条目相对路径会失败）
+    # 麻豆/国产专区：若解析出 actors 但未装配 actor_images，自动装配进入头像处理链路
+    if not d.get("actor_images") and d.get("actors"):
+        d["actor_images"] = [{"name": a, "url": ""} for a in d["actors"]]
+
+    # 演员头像：下载女优图或从封面智能裁切，NFO 里写绝对路径（新条目相对路径会失败）
     if not args.no_images and d.get("actor_images"):
         thumbs = d.setdefault("actor_thumbs", {})
         for ai in d["actor_images"]:
@@ -525,7 +529,7 @@ def write_artifacts(d, folder: Path, video: Path, args, cover_bytes=None, cover_
                 primary_fetch=lambda u: _actor_session().fetch_url(
                     u, referer="https://www.javbus.com/"))
             if not _actor_img_ok(raw):
-                # 最后兜底：从已下载封面裁头像
+                # 智能兜底：从已下载封面正脸区域自动裁出 3:4 头像
                 pdata = b""
                 try:
                     pp = folder / (stem + "-poster.jpg")
@@ -537,12 +541,14 @@ def write_artifacts(d, folder: Path, video: Path, args, cover_bytes=None, cover_
                     pdata = cover_bytes
                 raw = aps.avatar_from_cover(pdata)
                 source = "poster"
+                if _actor_img_ok(raw):
+                    aps.save_cached_avatar(aps.normalize_madou_actor(name), raw)
             if _actor_img_ok(raw):
                 fp.write_bytes(raw)
                 thumbs[name] = str(fp.resolve())
                 if source != "primary":
-                    print("   演员图兜底 %s <- %s" % (name, source))
-            time.sleep(0.25)
+                    print("   演员头像已就绪 %s <- %s" % (name, source))
+            time.sleep(0.1)
     # 尊重既有刮削（PT 资源常自带发布组 nfo）：不是本工具写的 nfo 默认不覆盖，
     # 本轮只补缺失/劣质的图片。需要强制重写时加 --force。
     if nfo.exists() and not had_our_nfo and not getattr(args, "force", False):

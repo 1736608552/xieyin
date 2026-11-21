@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import html
 import json
+import os
 import re
 import subprocess
 import time
@@ -376,13 +377,93 @@ def baike_image(name: str) -> tuple[bytes, str, str]:
     return b"", "", ""
 
 
+_MADOU_DB = None
+
+
+def load_madou_db() -> dict:
+    global _MADOU_DB
+    if _MADOU_DB is not None:
+        return _MADOU_DB
+    candidates = [
+        os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "madou_actors.json"),
+        os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data", "madou_actors.json"),
+        os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "madou_actors.json"),
+        os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "data", "madou_actors.json"),
+    ]
+    p = ""
+    for c in candidates:
+        if os.path.exists(c):
+            p = c
+            break
+    try:
+        with open(p, "r", encoding="utf-8") as f:
+            _MADOU_DB = json.load(f)
+    except Exception:
+        _MADOU_DB = {"actors": {}}
+    return _MADOU_DB
+
+
+def normalize_madou_actor(name: str) -> str:
+    """麻豆及国产演员别名规范化映射"""
+    n = (name or "").strip()
+    if not n:
+        return ""
+    db = load_madou_db()
+    actors = db.get("actors") or {}
+    if n in actors:
+        return n
+    for main_name, info in actors.items():
+        if n in info.get("aliases", []):
+            return main_name
+    return n
+
+
+def cached_avatar(name: str) -> bytes:
+    """读取本地缓存的高清演员头像"""
+    name = (name or "").strip()
+    if not name:
+        return b""
+    candidates = [
+        os.path.join(os.environ.get("XIEYIN_DATA", ""), "avatars", name + ".jpg"),
+        os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data", "avatars", name + ".jpg"),
+    ]
+    for p in candidates:
+        if os.path.isfile(p):
+            try:
+                data = open(p, "rb").read()
+                if image_ok(data):
+                    return data
+            except Exception:
+                pass
+    return b""
+
+
+def save_cached_avatar(name: str, data: bytes) -> None:
+    """持久化缓存演员头像，供后续同一演员的所有影片永久复用"""
+    if not name or not data or not image_ok(data):
+        return
+    base = os.environ.get("XIEYIN_DATA") or os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data")
+    av_dir = os.path.join(base, "avatars")
+    try:
+        os.makedirs(av_dir, exist_ok=True)
+        p = os.path.join(av_dir, name + ".jpg")
+        with open(p, "wb") as f:
+            f.write(data)
+    except Exception:
+        pass
+
+
 def resolve(name: str, primary_url: str = "", primary_fetch=None,
             code: str = "") -> tuple[bytes, str, str]:
     """返回 (JPEG bytes, 来源 URL, 来源标记)。
 
-    primary_fetch 是 JavBus 的下载函数（需要固定 IP/Referer）。
-    顺序：主源 -> AV-League -> Wikidata -> 百度百科。
+    顺序：麻豆专库与本地头像缓存 -> 主源 -> AV-League -> Wikidata -> 百度百科。
     """
+    norm_name = normalize_madou_actor(name)
+    cached = cached_avatar(norm_name)
+    if cached:
+        return cached, "local://avatars/" + norm_name, "cache"
+
     if primary_url and not is_placeholder(primary_url):
         try:
             raw = primary_fetch(primary_url) if primary_fetch else fetch(primary_url)
@@ -390,9 +471,11 @@ def resolve(name: str, primary_url: str = "", primary_fetch=None,
             raw = b""
         jpg = to_jpeg(raw)
         if jpg and image_ok(jpg):
+            save_cached_avatar(norm_name, jpg)
             return jpg, primary_url, "primary"
     data, url, page = av_league_image(name)
     if data:
+        save_cached_avatar(norm_name, data)
         return data, url, "av-league"
     # JavDB 演员页有图，但反爬严格（无会话时会跳登录/403），暂不放进自动链路。
     # data, url, page = javdb_actor_image(code, name)
@@ -400,8 +483,10 @@ def resolve(name: str, primary_url: str = "", primary_fetch=None,
     #     return data, url, "javdb"
     data, url, page = wikidata_image(name)
     if data:
+        save_cached_avatar(norm_name, data)
         return data, url, "wikidata"
     data, url, page = baike_image(name)
     if data:
+        save_cached_avatar(norm_name, data)
         return data, url, "baike"
     return b"", "", ""
