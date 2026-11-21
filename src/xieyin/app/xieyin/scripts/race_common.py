@@ -237,12 +237,8 @@ def javdatabase_cid(code, timeout=12, retries=1):
     return ""
 
 
-def download_cover(url, timeout=12):
-    """下图：域名直连 + 所有候选 IP 并发竞速；完整 JPEG 优先，否则降级取最大半截图。
-
-    图床限速时 curl 常在 EOI 前被截断，严格只收完整图会导致整批无封面。
-    fanart/thumb 对半截 JPEG 仍可显示，poster 裁剪由 LOAD_TRUNCATED_IMAGES 兜住。
-    """
+def download_cover(url, timeout=35):
+    """下图：域名直连 + 所有候选 IP 并发竞速；必须是完整图片才采纳，拒绝任何残缺截断图。"""
     # DMM 图床：pics.dmm.co.jp 的 SNI 在部分网络（实测腾讯云）被阻断，
     # pics.dmm.com 是同一 CloudFront、同路径同文件，SNI 未被封。统一重映射。
     if url and "pics.dmm.co.jp" in url:
@@ -258,7 +254,6 @@ def download_cover(url, timeout=12):
     jobs = [i for i in ips if i] or [None]
     # javbus 自家图床有防盗链：不带 Referer 会 403，带了才 200
     ref = "https://www.javbus.com/" if "javbus.com" in host else None
-    best = None
     with ThreadPoolExecutor(max_workers=max(1, len(jobs))) as ex:
         futs = {ex.submit(curl, host, path, ip, timeout, ref): (ip or "dns") for ip in jobs}
         for f in as_completed(futs):
@@ -277,17 +272,19 @@ def download_cover(url, timeout=12):
                     import io
                     from PIL import Image
                     with Image.open(io.BytesIO(body)) as im:
+                        im.verify()
+                    with Image.open(io.BytesIO(body)) as im:
                         buf = io.BytesIO()
                         im.convert("RGB").save(buf, "JPEG", quality=95)
-                        return buf.getvalue()
+                        res = buf.getvalue()
+                        if jpeg_ok(res):
+                            return res
                 except Exception:
                     pass
 
             if is_jpeg and jpeg_ok(body):
                 return body
-            if best is None or len(body) > len(best):
-                best = body
-    return best
+    return None
 
 
 def _preflight_one(c):

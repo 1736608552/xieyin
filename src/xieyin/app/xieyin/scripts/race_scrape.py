@@ -425,7 +425,31 @@ def write_artifacts(d, folder: Path, video: Path, args, cover_bytes=None, cover_
             if not path.exists():
                 return True
             cur = path.read_bytes()
-            return (not rc.jpeg_ok(cur) and data_len > len(cur)) or allow
+            # 自动自愈判定：
+            # 1. 结构损坏或无 EOI (not rc.jpeg_ok)
+            # 2. 之前旧版本保存的截断黑块残图（通常只有 10~25KB，且新图 data_len 明显更大）
+            # 3. 图像检测：下半截出现大面积 (0,0,0) 补黑残缺
+            is_broken = not rc.jpeg_ok(cur) or (len(cur) < 32000 and data_len > 40000)
+            if not is_broken and len(cur) < 60000 and data_len > len(cur) * 1.3:
+                try:
+                    from PIL import Image
+                    import io
+                    with Image.open(io.BytesIO(cur)) as test_im:
+                        w, h = test_im.size
+                        bh = max(1, int(h * 0.12))
+                        bottom = test_im.crop((0, h - bh, w, h)).convert("RGB")
+                        colors = bottom.getcolors(maxcolors=16)
+                        if colors:
+                            black_count = sum(cnt for cnt, col in colors if col == (0, 0, 0))
+                            if black_count / (w * bh) > 0.95:
+                                top = test_im.crop((0, 0, w, bh)).convert("RGB")
+                                top_colors = top.getcolors(maxcolors=16)
+                                top_black = sum(cnt for cnt, col in top_colors if col == (0, 0, 0)) if top_colors else 0
+                                if top_black / (w * bh) < 0.8:
+                                    is_broken = True
+                except Exception:
+                    is_broken = True
+            return is_broken or allow
 
         # A2：按用途生成三张图（不再把封面包原样落盘）。
         # cover_kind：vertical/pl_right/still -> poster+thumb+fanart；lowres/None -> 仅 poster 回退
@@ -436,7 +460,7 @@ def write_artifacts(d, folder: Path, video: Path, args, cover_bytes=None, cover_
         try:
             from PIL import Image, ImageFile
             import io
-            ImageFile.LOAD_TRUNCATED_IMAGES = True   # 图床限速常返回半截 JPEG
+            ImageFile.LOAD_TRUNCATED_IMAGES = False   # 严禁截断容忍，杜绝下半截黑块残图
             with Image.open(io.BytesIO(cover_bytes)) as im:
                 im.load()
                 if cover_kind == "still":
@@ -446,8 +470,12 @@ def write_artifacts(d, folder: Path, video: Path, args, cover_bytes=None, cover_
                     poster_im = j._poster_im(im, 379, 538, right_half=(cover_kind == "pl_right"))
             poster_bytes = _jpeg_bytes(poster_im, 92)
         except Exception as e:
-            print(f"   ! 封面高级裁剪跳过（直接回退原图） {video.name}: {e}", file=sys.stderr)
-            poster_bytes = cover_bytes
+            if cover_bytes and rc.jpeg_ok(cover_bytes):
+                print(f"   ! 封面高级裁剪跳过（直接回退原图） {video.name}: {e}", file=sys.stderr)
+                poster_bytes = cover_bytes
+            else:
+                print(f"   ! 封面数据损坏或截断，跳过生成 {video.name}: {e}", file=sys.stderr)
+                poster_bytes = None
 
         if poster_bytes:
             if allowed(poster, len(poster_bytes)):
