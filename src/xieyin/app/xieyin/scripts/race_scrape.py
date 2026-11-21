@@ -446,24 +446,32 @@ def write_artifacts(d, folder: Path, video: Path, args, cover_bytes=None, cover_
                     poster_im = j._poster_im(im, 379, 538, right_half=(cover_kind == "pl_right"))
             poster_bytes = _jpeg_bytes(poster_im, 92)
         except Exception as e:
-            print(f"   ! 海报生成失败 {video.name}: {e}", file=sys.stderr)
+            print(f"   ! 封面高级裁剪跳过（直接回退原图） {video.name}: {e}", file=sys.stderr)
+            poster_bytes = cover_bytes
 
         if poster_bytes:
             if allowed(poster, len(poster_bytes)):
                 poster.write_bytes(poster_bytes)
-            if do_full:
-                thumb_bytes = make_thumb_bytes(poster_im)
-                if allowed(thumb, len(thumb_bytes)):
-                    thumb.write_bytes(thumb_bytes)
-                try:
-                    if cover_kind == "still" and still_im is not None:
-                        fanart_bytes = make_fanart_from_still(still_im)
-                    else:
-                        fanart_bytes = make_fanart_bytes(poster_im)
-                except Exception:
-                    fanart_bytes = None          # fanart 生成失败不写，不回退原图
-                if fanart_bytes and allowed(full, len(fanart_bytes)):
-                    full.write_bytes(fanart_bytes)
+            if do_full or poster_bytes:
+                if poster_im is not None:
+                    thumb_bytes = make_thumb_bytes(poster_im)
+                    if allowed(thumb, len(thumb_bytes)):
+                        thumb.write_bytes(thumb_bytes)
+                    try:
+                        if cover_kind == "still" and still_im is not None:
+                            fanart_bytes = make_fanart_from_still(still_im)
+                        else:
+                            fanart_bytes = make_fanart_bytes(poster_im)
+                    except Exception:
+                        fanart_bytes = None          # fanart 生成失败不写，不回退原图
+                    if fanart_bytes and allowed(full, len(fanart_bytes)):
+                        full.write_bytes(fanart_bytes)
+                else:
+                    # 无 PIL 环境兜底：thumb 与 fanart 直接采用原始下载封面，确保海报墙完整显示
+                    if allowed(thumb, len(cover_bytes)):
+                        thumb.write_bytes(cover_bytes)
+                    if allowed(full, len(cover_bytes)):
+                        full.write_bytes(cover_bytes)
         # 1.7.4：别名只在单视频目录写——多视频/平铺目录里别名会互相覆盖
         nvid = sum(1 for x in folder.iterdir()
                    if x.is_file() and j.media_ext.is_video(x.name))

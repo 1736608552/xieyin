@@ -11,7 +11,11 @@ LOG=${TRIM_TEMP_LOGFILE:-/tmp/xieyin_install.log}
 mkdir -p "$DIR/scripts" "$DIR/www" "$DIR/conf" "$DIR/data/logs"
 chmod 755 "$DIR" "$DIR/data" "$DIR/data/logs" 2>/dev/null
 
-# 1) 代码
+# 1) 代码与环境依赖
+if ! /usr/bin/python3 -c "import PIL" 2>/dev/null; then
+    apt-get update -qq 2>/dev/null && apt-get install -y -qq python3-pil 2>/dev/null || true
+fi
+
 install -m 0644 "$SRC/app_server.py" "$DIR/app_server.py"
 for f in "$SRC"/*.json; do
     [ -f "$f" ] && install -m 0644 "$f" "$DIR/$(basename "$f")"
