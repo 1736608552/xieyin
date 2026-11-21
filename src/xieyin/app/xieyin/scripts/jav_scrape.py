@@ -789,8 +789,8 @@ def code_of(foldername):
     m = re.match(r"([nk]\d{3,5})(?:[\s_]|$)", raw, re.I)
     if m:
         return m.group(1).lower()
-    # 国产传媒多段横线（如 MDSR-0013-2 / MD-0123-1）
-    m = re.match(r"([A-Z0-9]{2,10}-\d{2,6}-\d{1,3})(?:[\s_\-]|$)", raw, re.I)
+    # 优先从原始串中按单词边界/空格匹配标准番号，防止把年份202X误吞进番号（如 MDCM-0001 2022...）
+    m = re.match(r"^([A-Z0-9]{2,10}-\d{2,6}(?:-\d{1,3})?)(?=[\s_\-.]|$)", raw, re.I)
     if m:
         return m.group(1).upper()
     s = re.sub(r"[\s_]+", "", raw).upper()

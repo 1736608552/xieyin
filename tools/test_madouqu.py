@@ -17,6 +17,9 @@ from madouqu_parse import parse_madouqu
 
 class MadouquScrapeTest(unittest.TestCase):
     def test_code_of_madou(self):
+        # 带有年份的国产番号（防止年份前两位被吞入番号）
+        self.assertEqual(j.code_of("MDCM-0001 2022.11.05 國風按摩院 初訪春覺樓上 苏语棠 8.7"), "MDCM-0001")
+        self.assertEqual(j.code_of("MDSR-0001-1 2022.05.13 妖女榨汁 篇章一 秦老師的秘密 夏晴子 8.6 巨乳"), "MDSR-0001-1")
         # 多段国产番号
         self.assertEqual(j.code_of("MDSR-0013-2 郝叔叔和他的女人"), "MDSR-0013-2")
         self.assertEqual(j.code_of("MD-0123-1"), "MD-0123-1")

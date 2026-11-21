@@ -18,18 +18,20 @@ def parse_madouqu(body: bytes, code: str) -> dict:
     t = body.decode("utf-8", "ignore")
     d = {"code": code, "source": "madouqu"}
 
-    # 1. 封面大图 (OG Image / 正文图片)
-    m_cover = re.search(r'property=["\']og:image["\']\s+content=["\']([^"\']+)["\']', t)
+    # 1. 封面大图 (优先正文高清 lead 大图，次选 OG Image / 正文图片)
+    m_cover = re.search(r'class=["\'][^"\']*mdqn-article-lead[^"\']*["\'][^>]+src=["\']([^"\']+)["\']', t)
+    if not m_cover:
+        m_cover = re.search(r'property=["\']og:image["\']\s+content=["\']([^"\']+)["\']', t)
     if not m_cover:
         m_cover = re.search(r'name=["\']twitter:image["\']\s+content=["\']([^"\']+)["\']', t)
     if not m_cover:
         m_cover = re.search(r'class=["\']mdqn-cover[^"\']*["\'][^>]+src=["\']([^"\']+)["\']', t)
     if m_cover:
         c_url = m_cover.group(1).strip()
-        # 清除 WordPress Photon / i0.wp.com 缩略图参数，还原原始高清图 URL
-        if "wp-content/uploads" in c_url:
-            clean_url = re.sub(r"^https?://i[0-3]\.wp\.com/", "https://", c_url)
-            clean_url = clean_url.split("?")[0]
+        # 统一将包含 /wp-content/uploads/ 的任何失效旧图床重映射为当前站真实可用域名
+        if "/wp-content/uploads/" in c_url:
+            path_part = c_url.split("/wp-content/uploads/")[1].split("?")[0]
+            clean_url = f"https://madouqu2.shop/wp-content/uploads/{path_part}"
             d["cover"] = clean_url
         else:
             d["cover"] = c_url

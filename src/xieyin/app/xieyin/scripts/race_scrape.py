@@ -164,39 +164,48 @@ MADOU_CODE_RE = re.compile(
 def scrape_madouqu(code, ips):
     """国产传媒番号 -> 麻豆区 (madouqu2.shop) 刮削。"""
     import urllib.parse
-    c_lower = code.lower()
-    # 1. 尝试直达 /video/番号/
-    st, sz, body, via = rc.fetch_multi("madouqu2.shop", f"/video/{c_lower}/", ips, 15, min_size=1000)
-    if st == 200 and (b"og:image" in body or b"mdqn-cover" in body):
-        d = parse_madouqu(body, code)
-        if d.get("title"):
-            d["_via"] = "直达@%s" % via
-            return d
+    candidates = [code]
+    c_nodash = code.replace("-", "")
+    if c_nodash != code:
+        candidates.append(c_nodash)
+    if code.endswith("-1"):
+        base = code[:-2]
+        candidates.extend([base, base.replace("-", "")])
 
-    # 2. 直达失败则走搜索 /?s=番号
-    st, sz, body, via = rc.fetch_multi("madouqu2.shop", f"/?s={urllib.parse.quote(code)}", ips, 15, min_size=1000)
-    if st != 200:
-        raise RuntimeError(f"麻豆区搜索 HTTP {st}")
+    # 1. 尝试直达 /video/候选/
+    for cand in candidates:
+        c_lower = cand.lower()
+        st, sz, body, via = rc.fetch_multi("madouqu2.shop", f"/video/{c_lower}/", ips, 15, min_size=1000)
+        if st == 200 and (b"og:image" in body or b"mdqn-cover" in body or b"wp-content" in body):
+            d = parse_madouqu(body, code)
+            if d.get("title"):
+                d["_via"] = "直达@%s(%s)" % (via, cand)
+                return d
 
-    html_text = body.decode("utf-8", "ignore")
-    # 提取搜索结果卡片中的详情页链接
-    links = re.findall(r'href="https://madouqu2\.shop(/video/[^"]+)"', html_text)
-    if not links:
-        links = re.findall(r'href="(/video/[^"]+)"', html_text)
+    # 2. 直达失败则依次搜索候选关键词
+    for cand in candidates:
+        st, sz, body, via = rc.fetch_multi("madouqu2.shop", f"/?s={urllib.parse.quote(cand)}", ips, 15, min_size=1000)
+        if st != 200:
+            continue
 
-    if not links:
-        raise RuntimeError(f"麻豆区未搜到关于 {code} 的条目")
+        html_text = body.decode("utf-8", "ignore")
+        # 提取搜索结果卡片中的详情页链接
+        links = re.findall(r'href="https://madouqu2\.shop(/video/[^"]+)"', html_text)
+        if not links:
+            links = re.findall(r'href="(/video/[^"]+)"', html_text)
 
-    detail_path = links[0]
-    st2, sz2, detail_body, via2 = rc.fetch_multi("madouqu2.shop", detail_path, ips, 15, min_size=1000)
-    if st2 != 200:
-        raise RuntimeError(f"麻豆区详情页 HTTP {st2}")
+        if not links:
+            continue
 
-    d = parse_madouqu(detail_body, code)
-    if not d.get("title"):
-        raise RuntimeError("麻豆区详情页解析不到标题")
-    d["_via"] = "搜索@%s 详情@%s" % (via, via2)
-    return d
+        detail_path = links[0]
+        st2, sz2, detail_body, via2 = rc.fetch_multi("madouqu2.shop", detail_path, ips, 15, min_size=1000)
+        if st2 == 200:
+            d = parse_madouqu(detail_body, code)
+            if d.get("title"):
+                d["_via"] = "搜索@%s(%s) 详情@%s" % (via, cand, via2)
+                return d
+
+    raise RuntimeError(f"麻豆区未搜到关于 {code} 的条目（已尝试变体: {', '.join(candidates)}）")
 
 
 def scrape_source(name, code, cfg):

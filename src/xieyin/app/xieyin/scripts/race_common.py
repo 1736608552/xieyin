@@ -263,9 +263,27 @@ def download_cover(url, timeout=12):
         futs = {ex.submit(curl, host, path, ip, timeout, ref): (ip or "dns") for ip in jobs}
         for f in as_completed(futs):
             st, sz, body = f.result()
-            if st != 200 or len(body) < 10000 or body[:3] != b"\xff\xd8\xff":
+            if st != 200 or len(body) < 10000:
                 continue
-            if jpeg_ok(body):
+            # 支持 PNG / WebP / JPEG，统一转为标准 JPEG 供下游处理
+            is_jpeg = body[:3] == b"\xff\xd8\xff"
+            is_png = body[:4] == b"\x89PNG"
+            is_webp = len(body) > 12 and body[:4] == b"RIFF" and body[8:12] == b"WEBP"
+            if not (is_jpeg or is_png or is_webp):
+                continue
+
+            if is_png or is_webp:
+                try:
+                    import io
+                    from PIL import Image
+                    with Image.open(io.BytesIO(body)) as im:
+                        buf = io.BytesIO()
+                        im.convert("RGB").save(buf, "JPEG", quality=95)
+                        return buf.getvalue()
+                except Exception:
+                    pass
+
+            if is_jpeg and jpeg_ok(body):
                 return body
             if best is None or len(body) > len(best):
                 best = body
