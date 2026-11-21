@@ -26,6 +26,7 @@ import copy_scraped
 import fnos_meta as fm
 from javdb_parse import parse_javdb
 from jav321_parse import parse_jav321, make_cid
+from madouqu_parse import parse_madouqu
 
 DELAY = 1.8
 
@@ -54,7 +55,7 @@ def check_code(body, code):
     Tokyo Hot（n0502）；否则这些番号在 javbus 明明有页面也会被判"不一致"。
     """
     txt = body.decode("utf-8", "ignore").upper()
-    got = re.findall(r"\b([A-Z0-9]{2,6}-\d{2,5})\b", txt)
+    got = re.findall(r"\b([A-Z0-9]{2,6}-\d{2,5}(?:-\d{1,3})?)\b", txt)
     got += re.findall(r"\b(\d{6}[-_]\d{2,3})\b", txt)
     got += [m.lower() for m in re.findall(r"\b([NK]\d{3,5})\b", txt)]
     return code.upper() in got or code.lower() in got
@@ -153,8 +154,55 @@ def scrape_caribbeancom(code, ips):
     return d
 
 
+# 国产常见番号前缀特征正则（支持 MDSR-0013-2 这种多段格式）
+MADOU_CODE_RE = re.compile(
+    r"^(MD|MDSR|MDWP|MDYD|MDHT|MDX|MC|PM|TM|XK|MS|JD|DF|BL|EM|MT)[-_]?\d+",
+    re.I
+)
+
+
+def scrape_madouqu(code, ips):
+    """国产传媒番号 -> 麻豆区 (madouqu2.shop) 刮削。"""
+    import urllib.parse
+    c_lower = code.lower()
+    # 1. 尝试直达 /video/番号/
+    st, sz, body, via = rc.fetch_multi("madouqu2.shop", f"/video/{c_lower}/", ips, 15, min_size=1000)
+    if st == 200 and (b"og:image" in body or b"mdqn-cover" in body):
+        d = parse_madouqu(body, code)
+        if d.get("title"):
+            d["_via"] = "直达@%s" % via
+            return d
+
+    # 2. 直达失败则走搜索 /?s=番号
+    st, sz, body, via = rc.fetch_multi("madouqu2.shop", f"/?s={urllib.parse.quote(code)}", ips, 15, min_size=1000)
+    if st != 200:
+        raise RuntimeError(f"麻豆区搜索 HTTP {st}")
+
+    html_text = body.decode("utf-8", "ignore")
+    # 提取搜索结果卡片中的详情页链接
+    links = re.findall(r'href="https://madouqu2\.shop(/video/[^"]+)"', html_text)
+    if not links:
+        links = re.findall(r'href="(/video/[^"]+)"', html_text)
+
+    if not links:
+        raise RuntimeError(f"麻豆区未搜到关于 {code} 的条目")
+
+    detail_path = links[0]
+    st2, sz2, detail_body, via2 = rc.fetch_multi("madouqu2.shop", detail_path, ips, 15, min_size=1000)
+    if st2 != 200:
+        raise RuntimeError(f"麻豆区详情页 HTTP {st2}")
+
+    d = parse_madouqu(detail_body, code)
+    if not d.get("title"):
+        raise RuntimeError("麻豆区详情页解析不到标题")
+    d["_via"] = "搜索@%s 详情@%s" % (via, via2)
+    return d
+
+
 def scrape_source(name, code, cfg):
     ips = cfg["ips"]
+    if name == "madouqu":
+        return scrape_madouqu(code, ips)
     if name == "javbus":
         st, body = fetch_javbus(code, ips)
         if st != 200 or not body:
@@ -658,6 +706,11 @@ def race_one(code, pool, folder, video, args, log):
         cfg = {k: v for k, v in cfg.items() if k == "caribbeancom"}
         if not pool:
             return "SKIP  %s: 日期型番号（%s），Caribbeancom 未入池" % (folder.name, code)
+    elif MADOU_CODE_RE.match(code or ""):
+        # 国产传媒番号优先将 madouqu 置顶尝试
+        m_srcs = [s for s in pool if s["name"] == "madouqu"]
+        other_srcs = [s for s in pool if s["name"] != "madouqu"]
+        pool = m_srcs + other_srcs
     merged = None
     cover_done = False
     cover_size = 0

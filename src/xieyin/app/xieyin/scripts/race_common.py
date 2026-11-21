@@ -44,6 +44,8 @@ KNOWN_GOOD = {
     "pics.dmm.com": ["54.230.70.96", "54.230.70.127", "54.230.70.13", "54.230.70.27"],
     # 日期型番号（MMDDYY-NNN：素人/無修正）的唯一合规元数据源
     "www.caribbeancom.com": ["104.18.19.203"],
+    # 国产传媒番号源
+    "madouqu2.shop": ["172.67.182.203", "104.21.68.147"],
 }
 
 # 静态排除：内容站 / 播放站 / 停放页 / 无按番号搜索能力 / 国内已阻断
@@ -89,6 +91,9 @@ SOURCES = [
     dict(name="caribbeancom", host="www.caribbeancom.com", feat="Caribbeancom",
          probe="/moviepages/010120-001/index.html", kind="scrape",
          role="日期型番号专用"),
+    # 国产传媒/麻豆专供源
+    dict(name="madouqu", host="madouqu2.shop", feat="麻豆区",
+         probe="/", kind="scrape", role="国产传媒(麻豆/蜜桃/天美等)"),
 ]
 
 
